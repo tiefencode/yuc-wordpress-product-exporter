@@ -31,25 +31,10 @@ function get_shopify_product_feed_data() {
         'Default'     => 'Arts & Entertainment > Hobbies & Creative Arts > Collectibles'
     ];
 
+    // Hole die aktuelle Zeit als Unix-Timestamp, um Datumsvergleiche durchzuführen
+    $current_timestamp = current_time('timestamp');
+
     foreach ($products_data as $product) {
-        // Die Beschreibung für Shopify sollte die des Hauptprodukts sein
-        $product_description_html = wpautop($product['description']); // HTML-Tags für Shopify, ggf. mit wpautop für Absätze
-        $product_description_html = html_entity_decode($product_description_html, ENT_QUOTES, 'UTF-8');
-
-        // Die Kurz-Beschreibung für SEO Description
-        $product_short_description_html = wpautop($product['short_description']);
-        $product_short_description_html = html_entity_decode($product_short_description_html, ENT_QUOTES, 'UTF-8');
-
-        // Für jede "flachgeklopfte" Variante (einfache Produkte und Variationen)
-        $items_to_process = [];
-        if ($product['type'] === 'variable' && !empty($product['variations'])) {
-            foreach ($product['variations'] as $variation) {
-                $items_to_process[] = $variation;
-            }
-        } else {
-            $items_to_process[] = $product; // Einfaches Produkt
-        }
-
         // Parent-Produktobjekt für Attribut-Abfragen
         $parent_product_obj = wc_get_product($product['id']);
         $parent_product_title_original = html_entity_decode($product['name'], ENT_QUOTES, 'UTF-8'); // Originaltitel behalten
@@ -85,15 +70,24 @@ function get_shopify_product_feed_data() {
         // --- ENDE: Lieferzeit-Logik für das Hauptprodukt ---
 
         // --- START: Pods Release Date Logik ---
-        // Der korrigierte Meta-Key für das Pods-Feld "release_date"
         $pods_release_date_meta_key = 'release_date';
         $release_date_from_pods = get_post_meta($product['id'], $pods_release_date_meta_key, true);
-        $custom_release_date = ''; // Standardmäßig leer
+        $custom_release_date = '';
+        $formatted_future_release_date_for_description = ''; // Für die Beschreibung im Format TT.MM.JJJJ
 
         if (!empty($release_date_from_pods)) {
             try {
                 $date_obj = new DateTime($release_date_from_pods);
-                $custom_release_date = $date_obj->format('Y-m-d'); // Empfohlenes Format für Shopify
+                $release_timestamp = $date_obj->getTimestamp();
+
+                // Nur formatieren, wenn das Datum in der Zukunft liegt
+                if ($release_timestamp > $current_timestamp) {
+                    $formatted_future_release_date_for_description = $date_obj->format('d.m.Y'); // TT.MM.JJJJ
+                }
+
+                // Das custom.release_date Feld in Shopify erhält immer YYYY-MM-DD
+                $custom_release_date = $date_obj->format('Y-m-d');
+
             } catch (Exception $e) {
                 // Bei Fehlern im Datumsformat einfach den Rohwert übernehmen
                 $custom_release_date = $release_date_from_pods;
@@ -101,19 +95,46 @@ function get_shopify_product_feed_data() {
         }
         // --- ENDE: Pods Release Date Logik ---
 
+        // Die ursprüngliche Beschreibung für Shopify
+        $product_description_html = wpautop($product['description']);
+        $product_description_html = html_entity_decode($product_description_html, ENT_QUOTES, 'UTF-8');
+
+        // --- START: Anpassung der Produktbeschreibung mit Releasedatum (nur Zukunft, direktes Format) ---
+        $description_prefix = '';
+        if (!empty($formatted_future_release_date_for_description)) {
+            $description_prefix = '<p><strong>Erscheinungsdatum: ' . $formatted_future_release_date_for_description . '</strong></p>';
+            // Optional: Füge einen Zeilenumbruch hinzu, falls die Beschreibung direkt danach beginnen soll
+            // $description_prefix .= '<br><br>';
+        }
+        $final_product_description_html = $description_prefix . $product_description_html;
+        // --- ENDE: Anpassung der Produktbeschreibung ---
+
+        // Die Kurz-Beschreibung für SEO Description
+        $product_short_description_html = wpautop($product['short_description']);
+        $product_short_description_html = html_entity_decode($product_short_description_html, ENT_QUOTES, 'UTF-8');
+
+        // Für jede "flachgeklopfte" Variante (einfache Produkte und Variationen)
+        $items_to_process = [];
+        if ($product['type'] === 'variable' && !empty($product['variations'])) {
+            foreach ($product['variations'] as $variation) {
+                $items_to_process[] = $variation;
+            }
+        } else {
+            $items_to_process[] = $product;
+        }
+
 
         foreach ($items_to_process as $item) {
-            $is_variation = isset($item['parent_id']); // Prüfen, ob es eine Variation ist
+            $is_variation = isset($item['parent_id']);
 
-            // Shopify Handle Generierung
             $handle = $item['slug'];
             $handle = sanitize_title($handle);
 
-            // --- START: ANPASSUNG DER TITEL-GENERIERUNG (INKL. PREORDER-PRÄFIX OHNE DOPPELPUNKT) ---
-            $current_item_title = $parent_product_title_original; // Beginne mit dem Originaltitel
+            // --- START: ANPASSUNG DER TITEL-GENERIERUNG ---
+            $current_item_title = $parent_product_title_original;
 
             if ($is_preorder) {
-                $current_item_title = 'PREORDER ' . $current_item_title; // Füge "Preorder " ohne Doppelpunkt hinzu
+                $current_item_title = 'Preorder ' . $current_item_title;
             }
 
             if ($is_variation) {
@@ -214,7 +235,7 @@ function get_shopify_product_feed_data() {
                 'id'                          => $item['id'],
                 'Handle'                      => $handle,
                 'Title'                       => $current_item_title,
-                'Body (HTML)'                 => $product_description_html,
+                'Body (HTML)'                 => $final_product_description_html, // Hier wird die angepasste Beschreibung verwendet
                 'Vendor'                      => get_bloginfo('name'),
                 'Standardized Product Type'   => $standardized_category,
                 'Type'                        => $shopify_product_type,
@@ -222,10 +243,10 @@ function get_shopify_product_feed_data() {
                 'Published'                   => $published_status,
                 'Option1 Name'                => '',
                 'Option1 Value'               => '',
-                'Option2 Name'                => '',
-                'Option2 Value'               => '',
-                'Option3 Name'                => '',
-                'Option3 Value'               => '',
+                'Option2 Name'  => '',
+                'Option2 Value' => '',
+                'Option3 Name'  => '',
+                'Option3 Value' => '',
                 'Variant SKU'                 => $item['sku'],
                 'Variant Grams'               => $variant_grams,
                 'Variant Inventory Policy'    => 'deny',
@@ -284,7 +305,6 @@ function write_shopify_product_feed_csv( $data, $filename = 'shopify_product_fee
     $file_url   = $upload_dir['baseurl'] . '/woo_product_exports/' . $filename;
     $filepath   = $dir_path . $filename;
 
-    // Sicherstellen, dass der Export-Ordner existiert
     if ( ! is_dir( $dir_path ) ) {
         wp_mkdir_p( $dir_path );
     }
@@ -295,60 +315,21 @@ function write_shopify_product_feed_csv( $data, $filename = 'shopify_product_fee
         return false;
     }
 
-    // Shopify CSV Header - muss exakt der Shopify-Import-Spezifikation entsprechen
     $header = [
-        'id',
-        'Handle',
-        'Title',
-        'Body (HTML)',
-        'Vendor',
-        'Standardized Product Type',
-        'Type',
-        'Tags',
-        'Published',
-        'Option1 Name',
-        'Option1 Value',
-        'Option2 Name',
-        'Option2 Value',
-        'Option3 Name',
-        'Option3 Value',
-        'Variant SKU',
-        'Variant Grams',
-        'Variant Inventory Policy',
-        'Variant Fulfillment Service',
-        'Variant Price',
-        'Variant Compare At Price',
-        'Variant Requires Shipping',
-        'Variant Taxable',
-        'Variant Barcode',
-        'Image Src',
-        'Image Position',
-        'Image Alt Text',
-        'SEO Title',
-        'SEO Description',
-        'Google Shopping / Google Product Category',
-        'Google Shopping / Gender',
-        'Google Shopping / Age Group',
-        'Google Shopping / MPN',
-        'Google Shopping / Condition',
-        'Google Shopping / Custom Product',
-        'Google Shopping / Custom Label 0',
-        'Google Shopping / Custom Label 1',
-        'Google Shopping / Custom Label 2',
-        'Google Shopping / Custom Label 3',
-        'Google Shopping / Custom Label 4',
-        'Variant Image',
-        'Variant Weight Unit',
-        'Variant Inventory Tracker',
-        'Cost per item',
-        'Status',
-        'Variant Inventory Qty',
-        // --- NEUE CUSTOM-FELDER HINZUFÜGEN ZUM HEADER ---
-        'custom.delivery_time',
-        'custom.release_date',
+        'id', 'Handle', 'Title', 'Body (HTML)', 'Vendor', 'Standardized Product Type', 'Type', 'Tags', 'Published',
+        'Option1 Name', 'Option1 Value', 'Option2 Name', 'Option2 Value', 'Option3 Name', 'Option3 Value',
+        'Variant SKU', 'Variant Grams', 'Variant Inventory Policy', 'Variant Fulfillment Service',
+        'Variant Price', 'Variant Compare At Price', 'Variant Requires Shipping', 'Variant Taxable', 'Variant Barcode',
+        'Image Src', 'Image Position', 'Image Alt Text', 'Gift Card',
+        'SEO Title', 'SEO Description',
+        'Google Shopping / Google Product Category', 'Google Shopping / Gender', 'Google Shopping / Age Group',
+        'Google Shopping / MPN', 'Google Shopping / Condition', 'Google Shopping / Custom Product',
+        'Google Shopping / Custom Label 0', 'Google Shopping / Custom Label 1', 'Google Shopping / Custom Label 2',
+        'Google Shopping / Custom Label 3', 'Google Shopping / Custom Label 4',
+        'Variant Image', 'Variant Weight Unit', 'Variant Inventory Tracker', 'Cost per item', 'Status', 'Variant Inventory Qty',
+        'custom.delivery_time', 'custom.release_date',
     ];
 
-    // UTF-8 BOM hinzufügen
     fwrite($file, "\xEF\xBB\xBF");
     fputcsv( $file, $header, ',');
 
