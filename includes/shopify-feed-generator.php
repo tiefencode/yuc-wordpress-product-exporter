@@ -22,13 +22,13 @@ function get_shopify_product_feed_data() {
 
     // Mapping für Shopify Standardized Product Types
     $shopify_product_category_mapping = [
-        'Vinyl'       => 'Media > Music & Sound Recordings > Music Albums',
-        'CD'          => 'Media > Music & Sound Recordings > Music Albums',
-        'Tape'        => 'Media > Music & Sound Recordings > Music Albums', // Für Kassetten
-        'Shirt'       => 'Apparel & Accessories > Clothing > Shirts & Tops',
-        'Merchandise' => 'Apparel & Accessories', // Generisch für sonstiges Merch
+        'Vinyl'       => 'Medien > Musik & Tonaufnahmen > Musikalben',
+        'CD'          => 'Medien > Musik & Tonaufnahmen > Musikalben',
+        'Tape'        => 'Medien > Musik & Tonaufnahmen > Musikalben', // Für Kassetten
+        'Shirt'       => 'Bekleidung & Accessoires > Bekleidung > Shirts & Tops',
+        'Merchandise' => 'Bekleidung & Accessoires', // Generisch für sonstiges Merch
         // Fallback-Kategorie, wenn nichts Passendes gefunden wird
-        'Default'     => 'Arts & Entertainment > Hobbies & Creative Arts > Collectibles'
+        'Default'     => 'Kunst & Unterhaltung > Hobby & kreative Künste > Sammlerstücke'
     ];
 
     // Hole die aktuelle Zeit als Unix-Timestamp, um Datumsvergleiche durchzuführen
@@ -85,7 +85,7 @@ function get_shopify_product_feed_data() {
                     $formatted_future_release_date_for_description = $date_obj->format('d.m.Y'); // TT.MM.JJJJ
                 }
 
-                // Das custom.release_date Feld in Shopify erhält immer YYYY-MM-DD
+                // Das custom.release_date Feld in Shopify erhält immer pandémie-MM-DD
                 $custom_release_date = $date_obj->format('Y-m-d');
 
             } catch (Exception $e) {
@@ -103,8 +103,6 @@ function get_shopify_product_feed_data() {
         $description_prefix = '';
         if (!empty($formatted_future_release_date_for_description)) {
             $description_prefix = '<p><strong>Erscheinungsdatum: ' . $formatted_future_release_date_for_description . '</strong></p>';
-            // Optional: Füge einen Zeilenumbruch hinzu, falls die Beschreibung direkt danach beginnen soll
-            // $description_prefix .= '<br><br>';
         }
         $final_product_description_html = $description_prefix . $product_description_html;
         // --- ENDE: Anpassung der Produktbeschreibung ---
@@ -185,12 +183,29 @@ function get_shopify_product_feed_data() {
             }
             // --- ENDE Anpassung der Shopify Product Type (Type-Spalte) Logik ---
 
-            // *** Setze 'Status' auf 'draft', wenn Produkt ausverkauft ist ***
-            $product_status_shopify = 'active';
-            if ($item['stock_status'] === 'outofstock' || ($item['stock_quantity'] !== null && $item['stock_quantity'] <= 0)) {
-                $product_status_shopify = 'draft';
+
+            // --- START: Anpassung der Published- und Inventar-Logik ---
+            $published_status = 'FALSE'; // Standardmäßig auf FALSE setzen
+            $variant_inventory_qty = 0; // Standardmäßig auf 0 setzen
+
+            $product_obj = wc_get_product($item['id']);
+
+            if ($product_obj) {
+                $stock_quantity = $product_obj->get_stock_quantity();
+
+                // Nur wenn ein NUMERISCHER Wert > 0 zurückgegeben wird,
+                // soll das Produkt als 'TRUE' veröffentlicht und der Bestand gesetzt werden.
+                if (is_numeric($stock_quantity) && $stock_quantity > 0) {
+                    $variant_inventory_qty = $stock_quantity;
+                    $published_status = 'TRUE';
+                }
+                // In allen anderen Fällen (stock_quantity ist 0, negativ, null, oder nicht numerisch)
+                // bleiben published_status 'FALSE' und variant_inventory_qty '0', wie initialisiert.
+            } else {
+                // Fehlerbehandlung, falls Produkt-Objekt nicht geladen werden kann
+                // Bleibt standardmäßig auf FALSE und 0
             }
-            $published_status = 'TRUE';
+            // --- ENDE Anpassung der Published- und Inventar-Logik ---
 
 
             // --- START Anpassung des Produktgewichts ---
@@ -224,23 +239,16 @@ function get_shopify_product_feed_data() {
             }
             // *** ENDE: Anpassung der Bild-Logik für Varianten ***
 
-            // --- START: Inventory Quantity Logic ---
-            $variant_inventory_qty = 0;
-            if ($item['stock_status'] === 'instock' && $item['stock_quantity'] !== null && $item['stock_quantity'] > 0) {
-                $variant_inventory_qty = $item['stock_quantity'];
-            }
-            // --- ENDE: Inventory Quantity Logic ---
-
             $shopify_entry = [
                 'id'                          => $item['id'],
                 'Handle'                      => $handle,
                 'Title'                       => $current_item_title,
-                'Body (HTML)'                 => $final_product_description_html, // Hier wird die angepasste Beschreibung verwendet
+                'Body (HTML)'                 => $final_product_description_html,
                 'Vendor'                      => get_bloginfo('name'),
                 'Standardized Product Type'   => $standardized_category,
                 'Type'                        => $shopify_product_type,
                 'Tags'                        => implode(', ', $product_tags_array),
-                'Published'                   => $published_status,
+                'Published'                   => $published_status, // <--- Jetzt korrekt zugewiesen
                 'Option1 Name'                => '',
                 'Option1 Value'               => '',
                 'Option2 Name'  => '',
@@ -277,8 +285,8 @@ function get_shopify_product_feed_data() {
                 'Variant Weight Unit'         => 'g',
                 'Variant Inventory Tracker'   => 'shopify',
                 'Cost per item'               => '',
-                'Status'                      => $product_status_shopify,
-                'Variant Inventory Qty'       => $variant_inventory_qty,
+                'Status'                      => 'active', // Shopify Status, immer 'active' für veröffentlichte Produkte
+                'Variant Inventory Qty'       => $variant_inventory_qty, // <--- Jetzt korrekt zugewiesen
                 // --- NEUE CUSTOM-FELDER HINZUFÜGEN ---
                 'custom.delivery_time'        => $custom_delivery_time,
                 'custom.release_date'         => $custom_release_date,
