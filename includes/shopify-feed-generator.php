@@ -22,12 +22,12 @@ function get_shopify_product_feed_data() {
 
     // Mapping für Shopify Standardized Product Types
     $shopify_product_category_mapping = [
-        'Vinyl'       => 'Medien > Musik & Tonaufnahmen > Musikalben',
-        'CD'          => 'Medien > Musik & Tonaufnahmen > Musikalben',
-        'Tape'        => 'Medien > Musik & Tonaufnahmen > Musikalben',
-        'Shirt'       => 'Bekleidung & Accessoires > Bekleidung > Shirts & Tops',
-        'Merchandise' => 'Bekleidung & Accessoires',
-        'Default'     => 'Kunst & Unterhaltung > Hobby & kreative Künste > Sammlerstücke'
+        'Vinyl'       => 'Media > Music & Sound Recordings > Vinyl',
+        'CD'          => 'Media > Music & Sound Recordings > Music CDs',
+        'Tape'        => 'Media > Music & Sound Recordings > Music Cassette Tapes',
+        'Shirt'       => 'Apparel & Accessories > Clothing > Shirts & Tops',
+        'Merchandise' => 'Apparel & Accessories',
+        'Default'     => 'Media > Music & Sound Recordings'
     ];
 
     $current_timestamp = current_time('timestamp');
