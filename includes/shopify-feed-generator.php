@@ -22,12 +22,12 @@ function get_shopify_product_feed_data() {
 
     // Mapping für Shopify Standardized Product Types
     $shopify_product_category_mapping = [
-        'Vinyl'       => 'Media > Music & Sound Recordings > Vinyl',
-        'CD'          => 'Media > Music & Sound Recordings > Music CDs',
-        'Tape'        => 'Media > Music & Sound Recordings > Music Cassette Tapes',
-        'Shirt'       => 'Apparel & Accessories > Clothing > Shirts & Tops',
-        'Merchandise' => 'Apparel & Accessories',
-        'Default'     => 'Media > Music & Sound Recordings'
+        'Vinyl'       => 'Medien > Musik & Tonaufnahmen > Vinyl',
+        'Cd'          => 'Medien > Musik & Tonaufnahmen > Musik-CDs',
+        'Tape'        => 'Medien > Musik & Tonaufnahmen > Musikkassetten',
+        'Shirt'       => 'Bekleidung & Accessoires > Bekleidung > Bekleidungsoberteile > Shirts',
+        'Merchandise' => 'Bekleidung & Accessoires',
+        'Default'     => 'Medien > Musik & Tonaufnahmen'
     ];
 
     $current_timestamp = current_time('timestamp');
@@ -188,7 +188,7 @@ function get_shopify_product_feed_data() {
                 'Handle'                      => $handle,
                 'Title'                       => $current_item_title,
                 'Body (HTML)'                 => $final_product_description_html,
-                'Vendor'                      => get_bloginfo('name'),
+                'Vendor'                      => 'Young & Cold Records',
                 'Standardized Product Type'   => $standardized_category,
                 'Type'                        => $shopify_product_type,
                 'Tags'                        => implode(', ', $product_tags_array),
