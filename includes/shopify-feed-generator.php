@@ -24,35 +24,29 @@ function get_shopify_product_feed_data() {
     $shopify_product_category_mapping = [
         'Vinyl'       => 'Medien > Musik & Tonaufnahmen > Musikalben',
         'CD'          => 'Medien > Musik & Tonaufnahmen > Musikalben',
-        'Tape'        => 'Medien > Musik & Tonaufnahmen > Musikalben', // Für Kassetten
+        'Tape'        => 'Medien > Musik & Tonaufnahmen > Musikalben',
         'Shirt'       => 'Bekleidung & Accessoires > Bekleidung > Shirts & Tops',
-        'Merchandise' => 'Bekleidung & Accessoires', // Generisch für sonstiges Merch
-        // Fallback-Kategorie, wenn nichts Passendes gefunden wird
+        'Merchandise' => 'Bekleidung & Accessoires',
         'Default'     => 'Kunst & Unterhaltung > Hobby & kreative Künste > Sammlerstücke'
     ];
 
-    // Hole die aktuelle Zeit als Unix-Timestamp, um Datumsvergleiche durchzuführen
     $current_timestamp = current_time('timestamp');
 
     foreach ($products_data as $product) {
-        // Parent-Produktobjekt für Attribut-Abfragen
         $parent_product_obj = wc_get_product($product['id']);
-        $parent_product_title_original = html_entity_decode($product['name'], ENT_QUOTES, 'UTF-8'); // Originaltitel behalten
+        $parent_product_title_original = html_entity_decode($product['name'], ENT_QUOTES, 'UTF-8');
 
         // --- START: Lieferzeit-Logik für das Hauptprodukt (angepasst für Taxonomie oder Metafeld) ---
         $delivery_time_from_woocommerce = '';
-        $custom_delivery_time = '3 - 5 Werktage'; // Standardwert für Shopify Custom Field
-        $product_tags_array = $product['tags']; // Bestehende Tags als Array
-        $is_preorder = false; // Flag, um zu prüfen, ob es eine Vorbestellung ist
-
-        // Versuch 1: Als globales Produktattribut (Taxonomie) 'product_delivery_time' abrufen
+        $custom_delivery_time = '3 - 5 Werktage';
+        $product_tags_array = $product['tags'];
+        $is_preorder = false;
         $delivery_taxonomy_name = 'product_delivery_time';
         $delivery_terms = wp_get_post_terms($product['id'], $delivery_taxonomy_name, array('fields' => 'names'));
 
         if (!empty($delivery_terms) && !is_wp_error($delivery_terms)) {
             $delivery_time_from_woocommerce = $delivery_terms[0];
         } else {
-            // Fallback: Wenn keine Taxonomie-Begriffe gefunden wurden, versuchen wir es als Metafeld
             $delivery_meta_key = 'product_delivery_time';
             $delivery_time_from_woocommerce = get_post_meta($product['id'], $delivery_meta_key, true);
         }
@@ -60,58 +54,42 @@ function get_shopify_product_feed_data() {
         $trimmed_delivery_time = trim($delivery_time_from_woocommerce);
 
         if (!empty($trimmed_delivery_time) && $trimmed_delivery_time === 'Vorbestellung / Preorder') {
-            $custom_delivery_time = 'Vorbestellung'; // Der Wert, der in Shopify angezeigt werden soll
-            $is_preorder = true; // Setze das Preorder-Flag
-            // Füge "preorder" zum Tag-Array hinzu, falls noch nicht vorhanden
+            $custom_delivery_time = 'Vorbestellung';
+            $is_preorder = true;
             if (!in_array('preorder', $product_tags_array)) {
                 $product_tags_array[] = 'preorder';
             }
         }
-        // --- ENDE: Lieferzeit-Logik für das Hauptprodukt ---
 
         // --- START: Pods Release Date Logik ---
         $pods_release_date_meta_key = 'release_date';
         $release_date_from_pods = get_post_meta($product['id'], $pods_release_date_meta_key, true);
         $custom_release_date = '';
-        $formatted_future_release_date_for_description = ''; // Für die Beschreibung im Format TT.MM.JJJJ
+        $formatted_future_release_date_for_description = '';
 
         if (!empty($release_date_from_pods)) {
             try {
                 $date_obj = new DateTime($release_date_from_pods);
                 $release_timestamp = $date_obj->getTimestamp();
-
-                // Nur formatieren, wenn das Datum in der Zukunft liegt
                 if ($release_timestamp > $current_timestamp) {
-                    $formatted_future_release_date_for_description = $date_obj->format('d.m.Y'); // TT.MM.JJJJ
+                    $formatted_future_release_date_for_description = $date_obj->format('d.m.Y');
                 }
-
-                // Das custom.release_date Feld in Shopify erhält immer pandémie-MM-DD
                 $custom_release_date = $date_obj->format('Y-m-d');
-
             } catch (Exception $e) {
-                // Bei Fehlern im Datumsformat einfach den Rohwert übernehmen
                 $custom_release_date = $release_date_from_pods;
             }
         }
-        // --- ENDE: Pods Release Date Logik ---
 
-        // Die ursprüngliche Beschreibung für Shopify
         $product_description_html = wpautop($product['description']);
         $product_description_html = html_entity_decode($product_description_html, ENT_QUOTES, 'UTF-8');
-
-        // --- START: Anpassung der Produktbeschreibung mit Releasedatum (nur Zukunft, direktes Format) ---
         $description_prefix = '';
         if (!empty($formatted_future_release_date_for_description)) {
             $description_prefix = '<p><strong>Erscheinungsdatum: ' . $formatted_future_release_date_for_description . '</strong></p>';
         }
         $final_product_description_html = $description_prefix . $product_description_html;
-        // --- ENDE: Anpassung der Produktbeschreibung ---
-
-        // Die Kurz-Beschreibung für SEO Description
         $product_short_description_html = wpautop($product['short_description']);
         $product_short_description_html = html_entity_decode($product_short_description_html, ENT_QUOTES, 'UTF-8');
 
-        // Für jede "flachgeklopfte" Variante (einfache Produkte und Variationen)
         $items_to_process = [];
         if ($product['type'] === 'variable' && !empty($product['variations'])) {
             foreach ($product['variations'] as $variation) {
@@ -121,32 +99,23 @@ function get_shopify_product_feed_data() {
             $items_to_process[] = $product;
         }
 
-
         foreach ($items_to_process as $item) {
             $is_variation = isset($item['parent_id']);
-
-            $handle = $item['slug'];
-            $handle = sanitize_title($handle);
-
-            // --- START: ANPASSUNG DER TITEL-GENERIERUNG ---
+            $handle = sanitize_title($item['slug']);
             $current_item_title = $parent_product_title_original;
 
             if ($is_preorder) {
                 $current_item_title = 'Preorder ' . $current_item_title;
             }
-
             if ($is_variation) {
                 $variation_obj = wc_get_product($item['id']);
                 if ($variation_obj && $variation_obj->is_type('variation')) {
                     $attributes_display_string = [];
                     $variation_attributes = $variation_obj->get_variation_attributes();
-
                     if (!empty($variation_attributes)) {
                         foreach ($variation_attributes as $attribute_taxonomy_slug => $term_slug) {
                             $actual_taxonomy_name = str_replace('attribute_', '', $attribute_taxonomy_slug);
-
                             $term_object = get_term_by('slug', $term_slug, $actual_taxonomy_name);
-
                             if ($term_object && !is_wp_error($term_object)) {
                                 $attributes_display_string[] = $term_object->name;
                             } else {
@@ -159,85 +128,60 @@ function get_shopify_product_feed_data() {
                     }
                 }
             }
-            // --- ENDE: ANPASSUNG DER TITEL-GENERIERUNG ---
 
-
-            // --- START Anpassung der Shopify Product Type (Type-Spalte) Logik ---
             $shopify_product_type = '';
             if (stripos($current_item_title, 'shirt') !== false) {
                 $shopify_product_type = 'Shirt';
             } else {
-                $item_object = wc_get_product( $item['id'] );
-                if ( $item_object && $item_object->is_type('variation') ) {
+                $item_object = wc_get_product($item['id']);
+                if ($item_object && $item_object->is_type('variation')) {
                     $item_attributes = $item_object->get_variation_attributes();
                     if (isset($item_attributes['attribute_pa_sound-carrier']) && !empty($item_attributes['attribute_pa_sound-carrier'])) {
                         $shopify_product_type = ucfirst($item_attributes['attribute_pa_sound-carrier']);
                     }
                 }
                 if (empty($shopify_product_type)) {
-                    $sound_carrier_terms = wp_get_post_terms( $product['id'], 'pa_sound-carrier', array( 'fields' => 'names' ) );
-                    if ( ! empty( $sound_carrier_terms ) && is_array( $sound_carrier_terms ) ) {
+                    $sound_carrier_terms = wp_get_post_terms($product['id'], 'pa_sound-carrier', array('fields' => 'names'));
+                    if (!empty($sound_carrier_terms) && is_array($sound_carrier_terms)) {
                         $shopify_product_type = $sound_carrier_terms[0];
                     }
                 }
             }
-            // --- ENDE Anpassung der Shopify Product Type (Type-Spalte) Logik ---
 
+            // ####################################################################
+            // ### START: FINALE, VEREINFACHTE LOGIK                            ###
+            // ####################################################################
+            // Die Sichtbarkeit wird direkt in Shopify gesteuert (Theme/Kollektionen).
+            // Dieses Skript sorgt nur dafür, dass alle Produkte als 'active' und 'published'
+            // übergeben werden und Shopify die korrekte Lagermenge erhält.
 
-            // --- START: Anpassung der Published- und Inventar-Logik ---
-            $published_status = 'FALSE'; // Standardmäßig auf FALSE setzen
-            $variant_inventory_qty = 0; // Standardmäßig auf 0 setzen
+            $product_status_shopify = 'active';
+            $published_status = 'TRUE';
+            $variant_inventory_qty = 0;
 
             $product_obj = wc_get_product($item['id']);
 
             if ($product_obj) {
-                $stock_quantity = $product_obj->get_stock_quantity();
-
-                // Nur wenn ein NUMERISCHER Wert > 0 zurückgegeben wird,
-                // soll das Produkt als 'TRUE' veröffentlicht und der Bestand gesetzt werden.
-                if (is_numeric($stock_quantity) && $stock_quantity > 0) {
-                    $variant_inventory_qty = $stock_quantity;
-                    $published_status = 'TRUE';
-                }
-                // In allen anderen Fällen (stock_quantity ist 0, negativ, null, oder nicht numerisch)
-                // bleiben published_status 'FALSE' und variant_inventory_qty '0', wie initialisiert.
-            } else {
-                // Fehlerbehandlung, falls Produkt-Objekt nicht geladen werden kann
-                // Bleibt standardmäßig auf FALSE und 0
+                // Nur die exakte Menge aus WooCommerce holen.
+                $qty_from_woo = $product_obj->get_stock_quantity();
+                $variant_inventory_qty = is_numeric($qty_from_woo) ? $qty_from_woo : 0;
             }
-            // --- ENDE Anpassung der Published- und Inventar-Logik ---
+            // ####################################################################
+            // ### ENDE: FINALE, VEREINFACHTE LOGIK ###
+            // ####################################################################
 
-
-            // --- START Anpassung des Produktgewichts ---
-            $variant_grams = '';
-            if ( stripos( $shopify_product_type, 'Vinyl' ) !== false ) {
-                $variant_grams = 1000;
-            } else {
-                $variant_grams = 100;
-            }
-            // --- ENDE Anpassung des Produktgewichts ---
-
-
-            // Shopify Standardized Product Category
+            $variant_grams = (stripos($shopify_product_type, 'Vinyl') !== false) ? 1000 : 100;
             $standardized_category = $shopify_product_category_mapping['Default'];
             if (!empty($shopify_product_type) && isset($shopify_product_category_mapping[$shopify_product_type])) {
                 $standardized_category = $shopify_product_category_mapping[$shopify_product_type];
             }
-
-            // *** START: Anpassung der Bild-Logik für Varianten ***
-            $image_src = '';
+            $image_src = $product['image_url'];
             if ($is_variation) {
                 $variation_object = wc_get_product($item['id']);
                 if ($variation_object && $variation_object->get_image_id() !== 0) {
-                    $image_id = $variation_object->get_image_id();
-                    $image_src = wp_get_attachment_url($image_id);
-                } else {
-                    $image_src = $product['image_url'];
+                    $image_src = wp_get_attachment_url($variation_object->get_image_id());
                 }
-            } else {
-                $image_src = $product['image_url'];
             }
-            // *** ENDE: Anpassung der Bild-Logik für Varianten ***
 
             $shopify_entry = [
                 'id'                          => $item['id'],
@@ -248,13 +192,8 @@ function get_shopify_product_feed_data() {
                 'Standardized Product Type'   => $standardized_category,
                 'Type'                        => $shopify_product_type,
                 'Tags'                        => implode(', ', $product_tags_array),
-                'Published'                   => $published_status, // <--- Jetzt korrekt zugewiesen
-                'Option1 Name'                => '',
-                'Option1 Value'               => '',
-                'Option2 Name'  => '',
-                'Option2 Value' => '',
-                'Option3 Name'  => '',
-                'Option3 Value' => '',
+                'Published'                   => $published_status,
+                'Option1 Name'                => '', 'Option1 Value' => '', 'Option2 Name'  => '', 'Option2 Value' => '', 'Option3 Name'  => '', 'Option3 Value' => '',
                 'Variant SKU'                 => $item['sku'],
                 'Variant Grams'               => $variant_grams,
                 'Variant Inventory Policy'    => 'deny',
@@ -270,35 +209,22 @@ function get_shopify_product_feed_data() {
                 'Gift Card'                   => 'FALSE',
                 'SEO Title'                   => html_entity_decode($parent_product_title_original, ENT_QUOTES, 'UTF-8'),
                 'SEO Description'             => $product_short_description_html,
-                'Google Shopping / Google Product Category' => '',
-                'Google Shopping / Gender'    => '',
-                'Google Shopping / Age Group' => '',
-                'Google Shopping / MPN'       => '',
-                'Google Shopping / Condition' => 'new',
-                'Google Shopping / Custom Product' => '',
-                'Google Shopping / Custom Label 0' => '',
-                'Google Shopping / Custom Label 1' => '',
-                'Google Shopping / Custom Label 2' => '',
-                'Google Shopping / Custom Label 3' => '',
-                'Google Shopping / Custom Label 4' => '',
+                'Google Shopping / Google Product Category' => '', 'Google Shopping / Gender'    => '', 'Google Shopping / Age Group' => '', 'Google Shopping / MPN'       => '', 'Google Shopping / Condition' => 'new', 'Google Shopping / Custom Product' => '', 'Google Shopping / Custom Label 0' => '', 'Google Shopping / Custom Label 1' => '', 'Google Shopping / Custom Label 2' => '', 'Google Shopping / Custom Label 3' => '', 'Google Shopping / Custom Label 4' => '',
                 'Variant Image'               => '',
                 'Variant Weight Unit'         => 'g',
                 'Variant Inventory Tracker'   => 'shopify',
                 'Cost per item'               => '',
-                'Status'                      => 'active', // Shopify Status, immer 'active' für veröffentlichte Produkte
-                'Variant Inventory Qty'       => $variant_inventory_qty, // <--- Jetzt korrekt zugewiesen
-                // --- NEUE CUSTOM-FELDER HINZUFÜGEN ---
+                'Status'                      => $product_status_shopify,
+                'Variant Inventory Qty'       => $variant_inventory_qty,
                 'custom.delivery_time'        => $custom_delivery_time,
                 'custom.release_date'         => $custom_release_date,
             ];
-
             $shopify_data[] = $shopify_entry;
         }
     }
 
     return $shopify_data;
 }
-
 
 /**
  * Funktion zum Schreiben der Shopify Product Feed-Daten in eine CSV-Datei.
@@ -312,17 +238,14 @@ function write_shopify_product_feed_csv( $data, $filename = 'shopify_product_fee
     $dir_path   = $upload_dir['basedir'] . '/woo_product_exports/';
     $file_url   = $upload_dir['baseurl'] . '/woo_product_exports/' . $filename;
     $filepath   = $dir_path . $filename;
-
     if ( ! is_dir( $dir_path ) ) {
         wp_mkdir_p( $dir_path );
     }
-
     $file = fopen( $filepath, 'w' );
     if ( ! $file ) {
         error_log( "WooCommerce Exporter: Could not open/create Shopify file for writing at " . $filepath );
         return false;
     }
-
     $header = [
         'id', 'Handle', 'Title', 'Body (HTML)', 'Vendor', 'Standardized Product Type', 'Type', 'Tags', 'Published',
         'Option1 Name', 'Option1 Value', 'Option2 Name', 'Option2 Value', 'Option3 Name', 'Option3 Value',
@@ -337,10 +260,8 @@ function write_shopify_product_feed_csv( $data, $filename = 'shopify_product_fee
         'Variant Image', 'Variant Weight Unit', 'Variant Inventory Tracker', 'Cost per item', 'Status', 'Variant Inventory Qty',
         'custom.delivery_time', 'custom.release_date',
     ];
-
     fwrite($file, "\xEF\xBB\xBF");
     fputcsv( $file, $header, ',');
-
     foreach ( $data as $row ) {
         $csv_row = [];
         foreach ($header as $column_name) {
@@ -348,9 +269,7 @@ function write_shopify_product_feed_csv( $data, $filename = 'shopify_product_fee
         }
         fputcsv( $file, $csv_row, ',');
     }
-
     fclose( $file );
     @chmod( $filepath, 0664 );
-
     return $file_url;
 }
